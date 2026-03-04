@@ -41,3 +41,49 @@ int RelCacheTable::getRelCatEntry(int relId, RelCatEntry* relCatBuf) {
 
   return SUCCESS;
 }
+
+
+/* Returns the searchIndex for the relation corresponding to `relId` */
+int RelCacheTable::getSearchIndex(int relId, RecId* searchIndex) {
+  // Check if 0 <= relId < MAX_OPEN and return E_OUTOFBOUND otherwise
+  if (relId < 0 || relId >= MAX_OPEN) {
+    return E_OUTOFBOUND;
+  }
+
+  // Check if relCache[relId] == nullptr and return E_RELNOTOPEN if true
+  if (relCache[relId] == nullptr) {
+    return E_RELNOTOPEN;
+  }
+
+  // Copy the searchIndex field of the Relation Cache entry 
+  // corresponding to input relId to the searchIndex variable.
+  *searchIndex = relCache[relId]->searchIndex;
+  
+  return SUCCESS;
+}
+
+/* Sets the searchIndex for the relation corresponding to relId */
+int RelCacheTable::setSearchIndex(int relId, RecId* searchIndex) {
+  // Check if 0 <= relId < MAX_OPEN and return E_OUTOFBOUND otherwise
+  if (relId < 0 || relId >= MAX_OPEN) {
+    return E_OUTOFBOUND;
+  }
+
+  // Check if relCache[relId] == nullptr and return E_RELNOTOPEN if true
+  if (relCache[relId] == nullptr) {
+    return E_RELNOTOPEN;
+  }
+
+  // Update the searchIndex value in the relCache for the relId 
+  // to the searchIndex argument
+  relCache[relId]->searchIndex = *searchIndex;
+
+  return SUCCESS;
+}
+
+/* Resets the search index to {-1, -1} */
+int RelCacheTable::resetSearchIndex(int relId) {
+  // Use setSearchIndex to set the search index to {-1, -1}
+  RecId resetIndex = {-1, -1};
+  return setSearchIndex(relId, &resetIndex);
+}

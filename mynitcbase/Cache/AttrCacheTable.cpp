@@ -48,3 +48,54 @@ int AttrCacheTable::getAttrCatEntry(int relId, int attrOffset, AttrCatEntry* att
   // 4. If we reach the end of the list and didn't find it
   return E_ATTRNOTEXIST;
 }
+
+int AttrCacheTable::getAttrCatEntry(int relId, char attrName[ATTR_SIZE], AttrCatEntry* attrCatBuf) {
+
+  // Check that relId is valid and corresponds to an open relation
+  if (relId < 0 || relId >= MAX_OPEN) {
+    return E_OUTOFBOUND;
+  }
+  if (attrCache[relId] == nullptr) {
+    return E_RELNOTOPEN;
+  }
+
+  // Iterate over the entries in the attribute cache linked list 
+  // and set attrCatBuf to the entry that matches attrName
+  for (AttrCacheEntry* entry = attrCache[relId]; entry != nullptr; entry = entry->next) {
+    if (strcmp(entry->attrCatEntry.attrName, attrName) == 0) {
+      *attrCatBuf = entry->attrCatEntry;
+      return SUCCESS;
+    }
+  }
+
+  // No attribute with name attrName found for the relation
+  return E_ATTRNOTEXIST;
+}
+
+int RecBuffer::getSlotMap(unsigned char *slotMap) {
+    unsigned char *bufferPtr;
+
+    // get the starting address of the buffer containing the block
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    struct HeadInfo head;
+    // get the header of the block
+    this->getHeader(&head);
+
+    // number of slots in block from header
+    int slotCount = head.numSlots;
+
+    // get a pointer to the beginning of the slotmap in memory by offsetting HEADER_SIZE
+    unsigned char *slotMapInBuffer = bufferPtr + 32; // HEADER_SIZE is 32
+
+    // copy the values from slotMapInBuffer to slotMap
+    // (we use a loop here just in case memcpy is the thing getting stripped out)
+    for (int slot = 0; slot < slotCount; slot++) {
+        slotMap[slot] = slotMapInBuffer[slot];
+    }
+
+    return SUCCESS;
+}
