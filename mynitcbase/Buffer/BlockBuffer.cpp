@@ -110,15 +110,50 @@ int BlockBuffer::loadBlockAndGetBufferPtr(unsigned char **buffPtr) {
 }
 
 int compareAttrs(union Attribute attr1, union Attribute attr2, int attrType) {
-
     double diff;
-    if attrType == STRING
-        diff = strcmp(attr1.sval, attr2.sval)
+    
+    // 1. If the attributes are STRINGS, use strcmp for lexicographic comparison
+    if (attrType == STRING) {
+        diff = strcmp(attr1.sVal, attr2.sVal);
+    } 
+    // 2. If the attributes are NUMBERS, simply subtract them
+    else if (attrType == NUMBER) {
+        diff = attr1.nVal - attr2.nVal;
+    }
 
-    else
-        diff = attr1.nval - attr2.nval
+    // 3. Return a clean 1, -1, or 0 based on the difference
+    if (diff > 0) {
+        return 1;
+    } else if (diff < 0) {
+        return -1;
+    } else {
+        return 0;
+    }
+}
 
-    if diff > 0 then return 1
-    if diff < 0 then return -1
-    if diff = 0 then return 0
+/* Used to get the slotmap from a record block */
+int RecBuffer::getSlotMap(unsigned char *slotMap) {
+  unsigned char *bufferPtr;
+
+  // 1. Get the starting address of the block in the buffer
+  int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+  if (ret != SUCCESS) {
+    return ret;
+  }
+
+  // 2. Get the header of the block so we know how many slots there are
+  struct HeadInfo head;
+  this->getHeader(&head);
+
+  int slotCount = head.numSlots;
+
+  // 3. Get a pointer to the beginning of the slotmap in memory.
+  // The slotmap starts immediately after the 32-byte header!
+  unsigned char *slotMapInBuffer = bufferPtr + HEADER_SIZE;
+
+  // 4. Copy the values from the buffer into the caller's array
+  // We copy exactly `slotCount` bytes because 1 byte = 1 slot in the slotmap.
+  memcpy(slotMap, slotMapInBuffer, slotCount);
+
+  return SUCCESS;
 }

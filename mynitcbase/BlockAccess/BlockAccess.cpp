@@ -3,131 +3,117 @@
 
 #include <cstring>
 
-RecId BlockAccess::linearSearch(int relId, char attrName[ATTR_SIZE],
-                                union Attribute attrVal, int op) {
-  // get the previous search index of the relation relId from the relation cache
-  // (use RelCacheTable::getSearchIndex() function)
-  RecId prevRecId;
-  RelCacheTable::getSearchIndex(relId, &prevRecId);
-  // let block and slot denote the record id of the record being currently
-  // checked
-  int block=-1, slot = -1;
-  // if the current search index record is invalid(i.e. both block and slot =
-  // -1)
-  if (prevRecId.block == -1 && prevRecId.slot == -1) {
-    // (no hits from previous search; search should start from the
-    // first record itself)
+RecId BlockAccess::linearSearch(int relId, char attrName[ATTR_SIZE], union Attribute attrVal, int op) {
+    
+    // 1. Get the relation catalog entry to find the first block
+    RelCatEntry relCatEntry;
+    RelCacheTable::getRelCatEntry(relId, &relCatEntry);
 
-    // get the first record block of the relation from the relation cache
-    // (use RelCacheTable::getRelCatEntry() function of Cache Layer)
-    RelCatEntry RelCatBuf;
-    RelCacheTable::getRelCatEntry(relId, &RelCatBuf);
-    // block = first record block of the relation
-    block = RelCatBuf.firstBlk;
-    slot = 0;
-    // slot = 0
-  } else {
-    // (there is a hit from previous search; search should start from
-    // the record next to the search index record)
+    // 2. Get the attribute catalog entry to find the column offset and type
+    AttrCatEntry attrCatEntry;
+    AttrCacheTable::getAttrCatEntry(relId, attrName, &attrCatEntry);
 
-    // block = search index's block
-    // slot = search index's slot + 1
-    block = prevRecId.block;
-    slot = prevRecId.slot + 1;
-  }
+    // 3. Get the current bookmark (searchIndex)
+    RecId searchIndex;
+    RelCacheTable::getSearchIndex(relId, &searchIndex);
 
-  /* The following code searches for the next record in the relation
-     that satisfies the given condition
-     We start from the record id (block, slot) and iterate over the remaining
-     records of the relation
-  */
- RelCatEntry relCatBuffer;
-	RelCacheTable::getRelCatEntry(relId, &relCatBuffer);
-  while (block != -1) {
-    /* create a RecBuffer object for block (use RecBuffer Constructor for
-       existing block) */
-    RecBuffer Buffer(block);
+    /* * 4. Determine exactly where to start looking.
+     * We need two variables: `block` and `slot` to track our current position.
+     */
+    int block, slot;
 
-    HeadInfo header;
-    Attribute CatRecord[RELCAT_NO_ATTRS];
-
-    // get the record with id (block, slot) using RecBuffer::getRecord()
-    Buffer.getRecord(CatRecord, slot);
-    // get header of the block using RecBuffer::getHeader() function
-    Buffer.getHeader(&header);
-    // get slot map of the block using RecBuffer::getSlotMap() function
-    unsigned char *slotMap =(unsigned char *)malloc(sizeof(unsigned char) * header.numSlots);
-    Buffer.getSlotMap(slotMap);
-
-    // If slot >= the number of slots per block(i.e. no more slots in this
-    // block)
-    // if (slot >= header.numSlots) {
-    //   // update block = right block of block
-    //   block = header.rblock;
-    //   slot = 0;
-    //   // update slot = 0
-    //   continue; // continue to the beginning of this while loop
-    // }
-
-    if (slot >= relCatBuffer.numSlotsPerBlk)
-		{
-			block =header.rblock, slot = 0;
-			continue; // continue to the beginning of this while loop
-		}
-
-    // if slot is free skip the loop
-    // (i.e. check if slot'th entry in slot map of block contains
-    // SLOT_UNOCCUPIED)
-    if (slotMap[slot] == SLOT_UNOCCUPIED) {
-      slot++;
-      continue;
-      // increment slot and continue to the next record slot
+    if (searchIndex.block == -1 && searchIndex.slot == -1) {
+        // If the bookmark is empty, start from the absolute beginning
+        block = relCatEntry.firstBlk;
+        slot = 0;
+    } else {
+        // If we have a bookmark, resume from the exact same block
+        block = searchIndex.block;
+        // BUT, we must start at the NEXT slot so we don't return the same record forever!
+        slot = searchIndex.slot + 1;
     }
 
-    // compare record's attribute value to the the given attrVal as below:
-    /*
-        firstly get the attribute offset for the attrName attribute
-        from the attribute cache entry of the relation using
-        AttrCacheTable::getAttrCatEntry()
-    */
-    AttrCatEntry attrCatBuf;
-    AttrCacheTable::getAttrCatEntry(relId, attrName, &attrCatBuf);
+    
+    /* =========================================================
+       THE SEARCH ENGINE LOOP
+       ========================================================= */
+       
+    // The loop continues as long as we haven't hit the end of the table (block == -1)
+    while (block != -1) {
+        
+        // 1. Load the current block into a buffer object
+        RecBuffer recBuffer(block);
 
+        // 2. Read the header to find out how many slots are here, and what the next block is
+        struct HeadInfo head;
+        recBuffer.getHeader(&head);
 
-    /* use the attribute offset to get the value of the attribute from
-       current record */
-    Attribute *record =(Attribute *)malloc(sizeof(Attribute) * header.numAttrs);
-    Buffer.getRecord(record, slot);
-    int attrOffset=attrCatBuf.offset;
+        // 3. Read the "seating chart" (slotmap) so we don't read garbage data
+        unsigned char slotMap[head.numSlots];
+        recBuffer.getSlotMap(slotMap);
 
-    int cmpVal = compareAttrs(record[attrOffset], attrVal,attrCatBuf.attrType); // will store the difference between the attributes
-    // set cmpVal using compareAttrs()
-    /* Next task is to check whether this record satisfies the given condition.
-       It is determined based on the output of previous comparison and
-       the op value received.
-       The following code sets the cond variable if the condition is satisfied.
-    */
-    if ((op == NE && cmpVal != 0) || // if op is "not equal to"
-        (op == LT && cmpVal < 0) ||  // if op is "less than"
-        (op == LE && cmpVal <= 0) || // if op is "less than or equal to"
-        (op == EQ && cmpVal == 0) || // if op is "equal to"
-        (op == GT && cmpVal > 0) ||  // if op is "greater than"
-        (op == GE && cmpVal >= 0)    // if op is "greater than or equal to"
-    ) {
-      /*
-      set the search index in the relation cache as
-      the record id of the record that satisfies the given condition
-      (use RelCacheTable::setSearchIndex function)
-      */
-      RecId newIndex;
-      newIndex.block = block;
-      newIndex.slot = slot;
-      RelCacheTable::setSearchIndex(relId, &newIndex);
-      return RecId{block, slot};
-    }
-    slot++;
-  }
+        /* 4. The Inner Loop: Check every slot in this block.
+         * Notice we don't initialize `int slot = 0` in the loop condition! 
+         * We use the `slot` variable we set up in Part 7, because if we are 
+         * resuming from a bookmark, we might start at slot 15, not 0.
+         */
+        for (; slot < head.numSlots; slot++) {
+            
+            // If the seat is empty (deleted or never used), skip it!
+            if (slotMap[slot] == SLOT_UNOCCUPIED) {
+                continue;
+            }
 
-  // no record in the relation with Id relid satisfies the given condition
-  return RecId{-1, -1};
+            // --- We found a VALID record! ---
+            // (Inside the for loop, right after the slotMap check)
+
+            // 1. Declare an array to hold the record and fetch it from the buffer
+            union Attribute record[head.numAttrs];
+            recBuffer.getRecord(record, slot);
+
+            // 2. Extract the specific column we want to test using the offset
+            union Attribute cmpAttr = record[attrCatEntry.offset];
+
+            // 3. Use our referee function to compare the record's value with the target value
+            int cmpVal = compareAttrs(cmpAttr, attrVal, attrCatEntry.attrType);
+
+            // 4. Check if the result matches the SQL operator the user typed
+            bool match = false;
+            switch (op) {
+                case NE: match = (cmpVal != 0); break; // Not Equal (!=)
+                case LT: match = (cmpVal < 0); break;  // Less Than (<)
+                case LE: match = (cmpVal <= 0); break; // Less Than or Equal (<=)
+                case EQ: match = (cmpVal == 0); break; // Equal (=)
+                case GT: match = (cmpVal > 0); break;  // Greater Than (>)
+                case GE: match = (cmpVal >= 0); break; // Greater Than or Equal (>=)
+            }
+
+            // 5. BINGO! We found a record that satisfies the condition.
+            if (match) {
+                // Create a RecId marking this exact location
+                RecId resultId = {block, slot};
+
+                // CRITICAL: Save this location as our bookmark!
+                // The next time linearSearch is called, it will resume from here.
+                RelCacheTable::setSearchIndex(relId, &resultId);
+
+                // Hand the winning location back to the caller
+                return resultId;
+            }
+            
+        } // End of inner slot loop
+
+        // 5. We finished checking all slots in this block.
+        // Move to the next block in the linked list.
+        block = head.rblock;
+        
+        // CRITICAL: Reset the slot back to 0 for the *next* block!
+        slot = 0; 
+        
+    } // End of outer block loop
+
+    // 6. If the while loop finishes and we are down here, it means we 
+    // searched the entire table and found absolutely nothing that matches.
+
+    return RecId{-1, -1}; // Placeholder return
 }

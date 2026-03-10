@@ -192,3 +192,22 @@ OpenRelTable::~OpenRelTable() {
       }
   }
 }
+
+int OpenRelTable::getRelId(char relName[ATTR_SIZE]) {
+
+  // 1. Check if the requested table is the Relation Catalog
+  if (strcmp(relName, RELCAT_RELNAME) == 0) {
+    return RELCAT_RELID; // Returns 0
+  }
+  
+  // 2. Check if the requested table is the Attribute Catalog
+  if (strcmp(relName, ATTRCAT_RELNAME) == 0) {
+    return ATTRCAT_RELID; // Returns 1
+  }
+
+  if (strcmp(relName, "Students") == 0) {
+    return 2; // We hardcoded the Students table to slot 2 in the constructor!
+  }
+  // 3. If it's anything else, tell the caller it isn't open right now!
+  return E_RELNOTOPEN;
+}
