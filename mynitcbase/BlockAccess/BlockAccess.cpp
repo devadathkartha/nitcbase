@@ -102,7 +102,7 @@ RecId BlockAccess::linearSearch(int relId, char attrName[ATTR_SIZE], union Attri
             }
             
         } // End of inner slot loop
-
+        
         // 5. We finished checking all slots in this block.
         // Move to the next block in the linked list.
         block = head.rblock;
