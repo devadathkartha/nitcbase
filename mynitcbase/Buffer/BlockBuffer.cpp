@@ -61,52 +61,85 @@ int RecBuffer::getRecord(union Attribute *rec, int slotNum) {
 }
 // Write the record at slotNum from the argument pointer
 int RecBuffer::setRecord(union Attribute *rec, int slotNum) {
-  struct HeadInfo head;
-  this->getHeader(&head);
 
-  int attrCount = head.numAttrs;
-  int slotCount = head.numSlots;
+    // Step 1: get pointer to buffer containing this block
+    unsigned char *bufferPtr;
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
 
-  // 1. Read the block
-  unsigned char buffer[BLOCK_SIZE];
-  Disk::readBlock(buffer, this->blockNum);
-
-  // 2. Calculate the offset
-  int recordSize = attrCount * ATTR_SIZE;
-  unsigned char *slotPointer = buffer + HEADER_SIZE + slotCount + (recordSize * slotNum);
-
-  // 3. Copy caller's data (rec) INTO the buffer
-  memcpy(slotPointer, rec, recordSize);
-
-  // 4. Write the modified buffer back to disk
-  Disk::writeBlock(buffer, this->blockNum);
-
-  return SUCCESS;
-}
-
-int BlockBuffer::loadBlockAndGetBufferPtr(unsigned char **buffPtr) {
-  // 1. CACHE HIT CHECK: Is the block already on our "bookshelf"?
-  int bufferNum = StaticBuffer::getBufferNum(this->blockNum);
-
-  // 2. CACHE MISS: It's not in the buffer! We need to fetch it from disk.
-  if (bufferNum == E_BLOCKNOTINBUFFER) {
-    
-    // Find an empty slot on the shelf
-    bufferNum = StaticBuffer::getFreeBuffer(this->blockNum);
-
-    if (bufferNum == E_OUTOFBOUND) {
-      return E_OUTOFBOUND; // Block number was invalid
+    if (ret != SUCCESS) {
+        return ret;
     }
 
-    // Read directly from the disk into the assigned slot in the StaticBuffer
-    Disk::readBlock(StaticBuffer::blocks[bufferNum], this->blockNum);
-  }
+    // Step 2: get the header to find numAttrs and numSlots
+    struct HeadInfo head;
+    getHeader(&head);
 
-  // 3. SUCCESS: Whether it was a Hit or a Miss, `bufferNum` now holds the correct index.
-  // We point the caller's pointer directly to that row in our 2D array.
-  *buffPtr = StaticBuffer::blocks[bufferNum];
+    int numAttrs = head.numAttrs;
+    int numSlots = head.numSlots;
 
-  return SUCCESS;
+    // Step 3: validate slotNum
+    if (slotNum < 0 || slotNum >= numSlots) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 4: calculate the size of one record
+    int recordSize = ATTR_SIZE * numAttrs;
+
+    // Step 5: calculate exact offset to the target slot
+    // bufferPtr + HEADER_SIZE               → skip header
+    //           + numSlots                  → skip slotmap
+    //           + (slotNum * recordSize)    → skip to correct slot
+    unsigned char *slotPointer = bufferPtr 
+                                + HEADER_SIZE 
+                                + (numSlots) 
+                                + (slotNum * recordSize);
+
+    // Step 6: copy record data into the buffer
+    memcpy(slotPointer, rec, recordSize);
+
+    // Step 7: mark this buffer as dirty (needs write-back)
+    StaticBuffer::setDirtyBit(this->blockNum);
+
+    return SUCCESS;
+}
+
+int BlockBuffer::loadBlockAndGetBufferPtr(unsigned char** buffPtr) {
+
+    // Step 1: check if block is already in buffer
+    int bufferNum = StaticBuffer::getBufferNum(this->blockNum);
+
+    if (bufferNum != E_BLOCKNOTINBUFFER) {
+        // block IS in buffer — just update timestamps
+
+        // increment timestamps of all other occupied buffers
+        for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++) {
+            if (StaticBuffer::metainfo[bufferIndex].free == false &&
+                bufferIndex != bufferNum) {
+                StaticBuffer::metainfo[bufferIndex].timeStamp++;
+            }
+        }
+
+        // reset THIS buffer's timestamp to 0 (most recently used)
+        StaticBuffer::metainfo[bufferNum].timeStamp = 0;
+
+    } else {
+        // block is NOT in buffer — need to load it
+
+        // Step 2: get a free buffer slot (may evict LRU block)
+        bufferNum = StaticBuffer::getFreeBuffer(this->blockNum);
+
+        if (bufferNum == E_OUTOFBOUND) {
+            return E_OUTOFBOUND;
+        }
+
+        // Step 3: read the block from disk into the buffer slot
+        Disk::readBlock(StaticBuffer::blocks[bufferNum], this->blockNum);
+    }
+
+    // Step 4: set the pointer to the start of this buffer slot
+    *buffPtr = StaticBuffer::blocks[bufferNum];
+
+    return SUCCESS;
 }
 
 int compareAttrs(union Attribute attr1, union Attribute attr2, int attrType) {
