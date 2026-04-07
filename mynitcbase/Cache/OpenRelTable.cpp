@@ -285,43 +285,83 @@ int OpenRelTable::openRel(char relName[ATTR_SIZE]) {
     return freeSlot;  // return the rel-id
 }
 
+// Cache/OpenRelTable.cpp
+
 int OpenRelTable::closeRel(int relId) {
 
-    // Step 1: prevent closing RELCAT or ATTRCAT
+    // RELATIONCAT (relId=0) and ATTRIBUTECAT (relId=1) cannot be closed
+    // They are always open while the system is running
     if (relId == RELCAT_RELID || relId == ATTRCAT_RELID) {
         return E_NOTPERMITTED;
     }
 
-    // Step 2: check relId is within valid range
+    // relId must be within valid range
     if (relId < 0 || relId >= MAX_OPEN) {
         return E_OUTOFBOUND;
     }
 
-    // Step 3: check the slot is actually occupied
-    if (tableMetaInfo[relId].free) {
+    // The slot must actually be occupied (a relation must be open here)
+    if (tableMetaInfo[relId].free == true) {
         return E_RELNOTOPEN;
     }
 
-    /************ Step 4: Free the relation cache entry ************/
+    /****** Step 1: Write back Relation Cache entry if dirty ******/
 
-    free(RelCacheTable::relCache[relId]);
-    RelCacheTable::relCache[relId] = nullptr;
+    if (RelCacheTable::relCache[relId]->dirty == true) {
 
-    /************ Step 5: Free the attribute cache linked list ************/
+        // Get the current (modified) RelCatEntry from the cache
+        RelCatEntry relCatEntry;
+        RelCacheTable::getRelCatEntry(relId, &relCatEntry);
 
-    AttrCacheEntry* curr = AttrCacheTable::attrCache[relId];
-    while (curr != nullptr) {
-        AttrCacheEntry* next = curr->next;
-        free(curr);
-        curr = next;
+        // Convert the struct to a record (array of union Attribute)
+        // so it can be written to the actual catalog block
+        union Attribute record[RELCAT_NO_ATTRS];
+        RelCacheTable::relCatEntryToRecord(&relCatEntry, record);
+
+        // Get the recId — tells us which block and slot to write to
+        // This is the location of this relation's entry in RELATIONCAT
+        RecId recId = RelCacheTable::relCache[relId]->recId;
+
+        // Open the RELATIONCAT block that contains this relation's entry
+        // Using Constructor2 because the block already exists on disk
+        RecBuffer relCatBlock(recId.block);
+
+        // Write the record into the correct slot
+        relCatBlock.setRecord(record, recId.slot);
+
+        // setRecord internally calls setDirtyBit, so the buffer will
+        // write this back to disk at shutdown
     }
+
+    /****** Step 2: Free the Attribute Cache entries ******/
+
+    // The attribute cache for this relation is a linked list of
+    // AttrCacheEntry nodes, each malloc'd when the relation was opened
+    // We must free them all to avoid memory leaks
+
+    AttrCacheEntry *attrCacheEntry = AttrCacheTable::attrCache[relId];
+
+    while (attrCacheEntry != nullptr) {
+        // Save pointer to next before freeing current
+        AttrCacheEntry *next = attrCacheEntry->next;
+        free(attrCacheEntry);
+        attrCacheEntry = next;
+    }
+
+    // Set the attr cache pointer to null for this relId
     AttrCacheTable::attrCache[relId] = nullptr;
 
-    /************ Step 6: Update tableMetaInfo ************/
+    /****** Step 3: Free the Relation Cache entry ******/
 
+    // Free the malloc'd RelCacheEntry for this relId
+    delete RelCacheTable::relCache[relId];
+    RelCacheTable::relCache[relId] = nullptr;
+
+    /****** Step 4: Mark the Open Relation Table slot as free ******/
+
+    // Reset the metainfo for this slot so it can be reused
     tableMetaInfo[relId].free = true;
-    // clear the relation name stored in this slot
-    memset(tableMetaInfo[relId].relName, 0, ATTR_SIZE);
+    strcpy(tableMetaInfo[relId].relName, "\0");
 
     return SUCCESS;
 }

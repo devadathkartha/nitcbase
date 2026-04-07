@@ -3,7 +3,19 @@
 unsigned char StaticBuffer::blocks[BUFFER_CAPACITY][BLOCK_SIZE];
 struct BufferMetaInfo StaticBuffer::metainfo[BUFFER_CAPACITY];
 
+// declare the blockAllocMap array
+unsigned char StaticBuffer::blockAllocMap[DISK_BLOCKS];
+
 StaticBuffer::StaticBuffer() {
+    // The BAM occupies the first 4 blocks on disk (blocks 0,1,2,3)
+    // Each block is 2048 bytes, 4 blocks = 8192 bytes = DISK_BLOCKS bytes
+    // We read them one block at a time into our blockAllocMap array
+
+    for (int i = 0; i < BLOCK_ALLOCATION_MAP_SIZE; i++) {
+        // Disk::readBlock reads one block (2048 bytes) from disk
+        // blockAllocMap + i*BLOCK_SIZE points to the right offset in the array
+        Disk::readBlock(blockAllocMap + (i * BLOCK_SIZE), i);
+    }
 
     // initialise all buffer slots as free and clean
     for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++) {
@@ -17,7 +29,10 @@ StaticBuffer::StaticBuffer() {
 // The destructor is empty for now. 
 // In Stage 4, we will add code here to save changes back to the disk when we exit!
 StaticBuffer::~StaticBuffer() {
-
+    // Write the in-memory blockAllocMap back to disk blocks 0-3
+    for (int i = 0; i < BLOCK_ALLOCATION_MAP_SIZE; i++) {
+        Disk::writeBlock(blockAllocMap + (i * BLOCK_SIZE), i);
+    }
     // iterate through all buffer slots
     for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++) {
 

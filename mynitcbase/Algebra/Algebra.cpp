@@ -114,3 +114,72 @@ int Algebra::select(char srcRel[ATTR_SIZE], char targetRel[ATTR_SIZE], char attr
 
   return SUCCESS;
 }
+
+// Algebra/Algebra.cpp
+
+int Algebra::insert(char relName[ATTR_SIZE], int nAttrs, char record[][ATTR_SIZE]) {
+
+    // RELATIONCAT and ATTRIBUTECAT cannot be inserted into by the user
+    // These are system catalog relations — protected from direct manipulation
+    if (strcmp(relName, RELCAT_RELNAME) == 0 || 
+        strcmp(relName, ATTRCAT_RELNAME) == 0) {
+        return E_NOTPERMITTED;
+    }
+
+    // Get the relation's relId from the Open Relation Table
+    // The relation must already be open for insertion to work
+    int relId = OpenRelTable::getRelId(relName);
+
+    if (relId == E_RELNOTOPEN) {
+        return E_RELNOTOPEN;
+    }
+
+    // Get the relation's catalog entry from the cache
+    // We need numAttrs to validate the input
+    RelCatEntry relCatEntry;
+    RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+
+    // Check if number of attributes provided matches the relation's schema
+    if (relCatEntry.numAttrs != nAttrs) {
+        return E_NATTRMISMATCH;
+    }
+
+    // This array will hold the converted attribute values
+    // record[][] is strings, but we need union Attribute for storage
+    union Attribute recordValues[nAttrs];
+
+    // Convert each string value to the correct type
+    for (int i = 0; i < nAttrs; i++) {
+
+        // Get the attribute catalog entry for the i-th attribute
+        // This tells us whether the attribute is NUMBER or STRING
+        AttrCatEntry attrCatEntry;
+        AttrCacheTable::getAttrCatEntry(relId, i, &attrCatEntry);
+
+        int type = attrCatEntry.attrType;
+
+        if (type == NUMBER) {
+            // Check if the string can actually be converted to a number
+            // isNumber() returns true if the string is a valid number
+            if (isNumber(record[i])) {
+                // atof() converts string to double
+                // e.g. "300" → 300.0, "3.14" → 3.14
+                recordValues[i].nVal = atof(record[i]);
+            } else {
+                // User passed a string where a number was expected
+                // e.g. INSERT INTO Locations VALUES (elhc, abc)
+                //                                          ↑ not a number
+                return E_ATTRTYPEMISMATCH;
+            }
+        } else if (type == STRING) {
+            // Simply copy the string value into sVal
+            // e.g. "elhc" → recordValues[i].sVal = "elhc"
+            strcpy(recordValues[i].sVal, record[i]);
+        }
+    }
+
+    // All validation passed, forward to Block Access Layer
+    int retVal = BlockAccess::insert(relId, recordValues);
+
+    return retVal;
+}

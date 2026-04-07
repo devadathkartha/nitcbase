@@ -87,3 +87,58 @@ int RelCacheTable::resetSearchIndex(int relId) {
   RecId resetIndex = {-1, -1};
   return setSearchIndex(relId, &resetIndex);
 }
+
+// Cache/RelCacheTable.cpp
+
+int RelCacheTable::setRelCatEntry(int relId, RelCatEntry *relCatBuf) {
+
+    // Check if relId is within valid range [0, MAX_OPEN-1]
+    if (relId < 0 || relId >= MAX_OPEN) {
+        return E_OUTOFBOUND;
+    }
+
+    // Check if this slot in the cache is actually in use
+    // A free slot means no relation is open at this relId
+    if (relCache[relId] == nullptr) {
+        return E_RELNOTOPEN;
+    }
+
+    // Copy the input RelCatEntry into the cache
+    // This updates the in-memory copy of the relation's catalog entry
+    relCache[relId]->relCatEntry = *relCatBuf;
+
+    // Mark this cache entry as dirty
+    // This tells closeRel() that it needs to write this back to disk
+    relCache[relId]->dirty = true;
+
+    return SUCCESS;
+}
+
+void RelCacheTable::relCatEntryToRecord(RelCatEntry *relCatEntry, 
+                                         union Attribute record[RELCAT_NO_ATTRS]) {
+    // RELATIONCAT has 6 attributes, in this exact order:
+    // [0] RelName      → string
+    // [1] #Attributes  → number
+    // [2] #Records     → number
+    // [3] FirstBlock   → number
+    // [4] LastBlock    → number
+    // [5] #Slots       → number
+
+    // Copy relation name into record[0] as a string
+    strcpy(record[RELCAT_REL_NAME_INDEX].sVal, relCatEntry->relName);
+
+    // Copy number of attributes into record[1] as a number
+    record[RELCAT_NO_ATTRIBUTES_INDEX].nVal = (double)relCatEntry->numAttrs;
+
+    // Copy number of records into record[2] as a number
+    record[RELCAT_NO_RECORDS_INDEX].nVal = (double)relCatEntry->numRecs;
+
+    // Copy first block number into record[3] as a number
+    record[RELCAT_FIRST_BLOCK_INDEX].nVal = (double)relCatEntry->firstBlk;
+
+    // Copy last block number into record[4] as a number
+    record[RELCAT_LAST_BLOCK_INDEX].nVal = (double)relCatEntry->lastBlk;
+
+    // Copy slots per block into record[5] as a number
+    record[RELCAT_NO_SLOTS_PER_BLOCK_INDEX].nVal = (double)relCatEntry->numSlotsPerBlk;
+}
