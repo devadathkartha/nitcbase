@@ -296,3 +296,174 @@ int BlockAccess::renameAttribute(char relName[ATTR_SIZE], char oldName[ATTR_SIZE
 
     return SUCCESS;
 }
+
+// BlockAccess/BlockAccess.cpp
+
+int BlockAccess::insert(int relId, Attribute *record) {
+
+    // Step 1: Get relation metadata from cache
+    RelCatEntry relCatEntry;
+    RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+
+    // Starting point for traversal = first block of the relation
+    int blockNum = relCatEntry.firstBlk;
+
+    // rec_id will store WHERE we will insert the new record
+    RecId rec_id = {-1, -1};
+
+    int numOfSlots      = relCatEntry.numSlotsPerBlk;
+    int numOfAttributes = relCatEntry.numAttrs;
+
+    // prevBlockNum tracks the last block we visited
+    // needed when we have to link a new block into the list
+    int prevBlockNum = -1;
+
+    /*
+        Step 2: Traverse the linked list of record blocks
+        looking for a block that has at least one free slot
+    */
+    while (blockNum != -1) {
+
+        // Open this block using Constructor2 (block already exists)
+        RecBuffer block(blockNum);
+
+        // Read the header to get rblock (next block) and numEntries
+        struct HeadInfo head;
+        block.getHeader(&head);
+
+        // Read the slot map to find free slots
+        unsigned char slotMap[numOfSlots];
+        block.getSlotMap(slotMap);
+
+        // Scan the slot map for a free slot
+        for (int i = 0; i < numOfSlots; i++) {
+            if (slotMap[i] == SLOT_UNOCCUPIED) {
+                // Found a free slot!
+                rec_id.block = blockNum;
+                rec_id.slot  = i;
+                break;
+            }
+        }
+
+        // If a free slot was found, stop traversing
+        if (rec_id.slot != -1) {
+            break;
+        }
+
+        // No free slot in this block, move to next block
+        prevBlockNum = blockNum;
+        blockNum     = head.rblock;  // follow the linked list
+    }
+
+    /*
+        Step 3: If no free slot found in ANY existing block,
+        allocate a brand new block
+    */
+    if (rec_id.block == -1 && rec_id.slot == -1) {
+
+        // RELATIONCAT is special — it cannot grow beyond its initial block
+        // Maximum relations = slots in RELCAT block = 20
+        if (relId == RELCAT_RELID) {
+            return E_MAXRELATIONS;
+        }
+
+        // Allocate a new record block using Constructor1
+        RecBuffer newBlock;
+
+        // Check if allocation succeeded
+        int ret = newBlock.getBlockNum();
+        if (ret == E_DISKFULL) {
+            return E_DISKFULL;
+        }
+
+        // New record will go into slot 0 of this new block
+        rec_id.block = ret;
+        rec_id.slot  = 0;
+
+        /*
+            Set up the header of the new block:
+            - Link it to the previous last block via lblock
+            - rblock = -1 (it's now the last block)
+            - numEntries = 0 (empty)
+            - numSlots and numAttrs from relation metadata
+        */
+        struct HeadInfo newHead;
+        newHead.blockType  = REC;
+        newHead.pblock     = -1;
+        newHead.lblock     = prevBlockNum;  // -1 if first block ever
+        newHead.rblock     = -1;            // nothing after this
+        newHead.numEntries = 0;
+        newHead.numAttrs   = numOfAttributes;
+        newHead.numSlots   = numOfSlots;
+        newBlock.setHeader(&newHead);
+
+        // Initialize all slots as free in the new block
+        unsigned char newSlotMap[numOfSlots];
+        for (int i = 0; i < numOfSlots; i++) {
+            newSlotMap[i] = SLOT_UNOCCUPIED;
+        }
+        newBlock.setSlotMap(newSlotMap);
+
+        /*
+            Link the new block into the existing linked list:
+
+            Case 1: prevBlockNum != -1 (relation had blocks before)
+            → update the previous last block's rblock to point to new block
+
+            Case 2: prevBlockNum == -1 (relation had NO blocks before)
+            → this is the very first block, update firstBlock in cache
+        */
+        if (prevBlockNum != -1) {
+            // Update the old last block's rblock to point to new block
+            RecBuffer prevBlock(prevBlockNum);
+            struct HeadInfo prevHead;
+            prevBlock.getHeader(&prevHead);
+            prevHead.rblock = rec_id.block;
+            prevBlock.setHeader(&prevHead);
+        } else {
+            // This is the first block ever for this relation
+            // Update firstBlock in the relation cache
+            relCatEntry.firstBlk = rec_id.block;
+            RelCacheTable::setRelCatEntry(relId, &relCatEntry);
+        }
+
+        // Either way, this new block is now the last block
+        relCatEntry.lastBlk = rec_id.block;
+        RelCacheTable::setRelCatEntry(relId, &relCatEntry);
+    }
+
+    /*
+        Step 4: Write the record into rec_id.slot of rec_id.block
+    */
+    RecBuffer insertBlock(rec_id.block);
+
+    // Write the actual record data into the slot
+    insertBlock.setRecord(record, rec_id.slot);
+
+    /*
+        Step 5: Update the slot map — mark this slot as occupied
+    */
+    unsigned char slotMap[numOfSlots];
+    insertBlock.getSlotMap(slotMap);
+    slotMap[rec_id.slot] = SLOT_OCCUPIED;
+    insertBlock.setSlotMap(slotMap);
+
+    /*
+        Step 6: Update the block header — increment numEntries
+    */
+    struct HeadInfo head;
+    insertBlock.getHeader(&head);
+    head.numEntries++;
+    insertBlock.setHeader(&head);
+
+    /*
+        Step 7: Update the relation cache — increment numRecords
+        This marks the cache entry as dirty (setRelCatEntry sets dirty=true)
+        so it will be written back to disk when the relation is closed
+    */
+    RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+    relCatEntry.numRecs++;
+    RelCacheTable::setRelCatEntry(relId, &relCatEntry);
+
+    return SUCCESS;
+}
