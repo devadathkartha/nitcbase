@@ -101,31 +101,93 @@ OpenRelTable::OpenRelTable() {
 
 OpenRelTable::~OpenRelTable() {
 
-  // Step 1: close all user-opened relations (index 2 onwards)
-  for (int i = 2; i < MAX_OPEN; ++i) {
-    if (!tableMetaInfo[i].free) {
-      OpenRelTable::closeRel(i);
+    // Task 1: Close all user-opened relations (slots 2 to MAX_OPEN-1)
+    // Slots 0 and 1 are RELCAT and ATTRCAT — handled separately below
+    for (int i = 2; i < MAX_OPEN; i++) {
+
+        // Check if this slot is occupied (a relation is open here)
+        if (tableMetaInfo[i].free == false) {
+
+            // Close it — this writes back its cache entries to disk
+            // and frees the cache memory for that relation
+            OpenRelTable::closeRel(i);
+        }
     }
-  }
 
-  // Step 2: manually free RELCAT (index 0) and ATTRCAT (index 1)
-  for (int i = 0; i <= 1; i++) {
+    /*---------------------------------------------------------
+      Task 2: Write back ATTRCAT's RelCache entry (relId = 1)
+    ----------------------------------------------------------*/
 
-    // free relCache entryCLOSE TABLE Students;
-    free(RelCacheTable::relCache[i]);
-    RelCacheTable::relCache[i] = nullptr;
+    // Check if ATTRCAT's relation cache entry was modified
+    if (RelCacheTable::relCache[ATTRCAT_RELID]->dirty == true) {
 
-    // free attrCache linked list
-    AttrCacheEntry *curr = AttrCacheTable::attrCache[i];
-    while (curr != nullptr) {
-      AttrCacheEntry *next = curr->next;
-      free(curr);
-      curr = next;
+        // Convert the in-memory RelCatEntry back to a disk record (array of Attributes)
+        Attribute relCatRecord[RELCAT_NO_ATTRS];
+        RelCacheTable::relCatEntryToRecord(
+            &RelCacheTable::relCache[ATTRCAT_RELID]->relCatEntry,
+            relCatRecord
+        );
+
+        // Get the RecId — where on disk is ATTRCAT's entry in RELCAT?
+        RecId recId = RelCacheTable::relCache[ATTRCAT_RELID]->recId;
+
+        // Create a RecBuffer for that block and write the record back
+        RecBuffer relCatBlock(recId.block);
+        relCatBlock.setRecord(relCatRecord, recId.slot);
     }
-    AttrCacheTable::attrCache[i] = nullptr;
-  }
+
+    // Free the dynamically allocated RelCacheEntry for ATTRCAT
+    delete RelCacheTable::relCache[ATTRCAT_RELID];
+
+
+    /*---------------------------------------------------------
+      Task 3: Write back RELCAT's RelCache entry (relId = 0)
+    ----------------------------------------------------------*/
+
+    // Check if RELCAT's relation cache entry was modified
+    if (RelCacheTable::relCache[RELCAT_RELID]->dirty == true) {
+
+        // Convert the in-memory RelCatEntry back to a disk record
+        Attribute relCatRecord[RELCAT_NO_ATTRS];
+        RelCacheTable::relCatEntryToRecord(
+            &RelCacheTable::relCache[RELCAT_RELID]->relCatEntry,
+            relCatRecord
+        );
+
+        // Get the RecId — where on disk is RELCAT's own entry in RELCAT?
+        RecId recId = RelCacheTable::relCache[RELCAT_RELID]->recId;
+
+        // Create a RecBuffer for that block and write the record back
+        RecBuffer relCatBlock(recId.block);
+        relCatBlock.setRecord(relCatRecord, recId.slot);
+    }
+
+    // Free the dynamically allocated RelCacheEntry for RELCAT
+    delete RelCacheTable::relCache[RELCAT_RELID];
+
+
+    /*---------------------------------------------------------
+      Task 4: Free AttrCache entries for RELCAT and ATTRCAT
+    ----------------------------------------------------------*/
+
+    // Free AttrCache linked list for RELCAT (relId = 0)
+    AttrCacheEntry* attrCacheEntry = AttrCacheTable::attrCache[RELCAT_RELID];
+    while (attrCacheEntry != nullptr) {
+        AttrCacheEntry* next = attrCacheEntry->next;
+        delete attrCacheEntry;
+        attrCacheEntry = next;
+    }
+
+    // Free AttrCache linked list for ATTRCAT (relId = 1)
+    attrCacheEntry = AttrCacheTable::attrCache[ATTRCAT_RELID];
+    while (attrCacheEntry != nullptr) {
+        AttrCacheEntry* next = attrCacheEntry->next;
+        delete attrCacheEntry;
+        attrCacheEntry
+        
+        = next;
+    }
 }
-
 int OpenRelTable::getRelId(char relName[ATTR_SIZE]) {
 
   // Check for RELCAT

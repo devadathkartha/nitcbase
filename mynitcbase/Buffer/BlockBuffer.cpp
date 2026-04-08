@@ -371,3 +371,30 @@ int BlockBuffer::getBlockNum() {
     // outside code cannot access it directly
     return this->blockNum;
 }
+
+void BlockBuffer::releaseBlock() {
+
+    // Step 1: If blockNum is already invalid, do nothing
+    // (prevents double-release bugs)
+    if (blockNum == INVALID_BLOCKNUM) {
+        return;
+    }
+
+    // Step 2: Check if this block is currently loaded in the buffer
+    int bufferNum = StaticBuffer::getBufferNum(blockNum);
+
+    // Step 3: If it IS in the buffer, free that buffer slot
+    if (bufferNum != E_BLOCKNOTINBUFFER) {
+        // Mark the buffer slot as free so it can be reused
+        StaticBuffer::metainfo[bufferNum].free = true;
+    }
+
+    // Step 4: Mark the block as UNUSED in the block allocation map
+    // This is the actual "freeing" on disk — now this block number
+    // can be allocated to a new block in the future
+    StaticBuffer::blockAllocMap[blockNum] = UNUSED_BLK;
+
+    // Step 5: Invalidate this object's blockNum
+    // Any further calls to this object's methods will now fail safely
+    blockNum = INVALID_BLOCKNUM;
+}
