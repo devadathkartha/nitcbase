@@ -759,3 +759,73 @@ int BlockAccess::search(int relId, Attribute *record,
     // (SUCCESS if all went well, or an error code)
     return ret;
 }
+
+
+int BlockAccess::project(int relId, Attribute *record) {
+
+    // Step 1: Get the previous search index
+    RecId prevRecId;
+    RelCacheTable::getSearchIndex(relId, &prevRecId);
+
+    int block, slot;
+
+    // Step 2: Determine starting block and slot
+    if (prevRecId.block == -1 && prevRecId.slot == -1) {
+        // Fresh start — get the first record block from relation cache
+        RelCatEntry relCatEntry;
+        RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+
+        block = relCatEntry.firstBlk;
+        slot  = 0;
+    } else {
+        // Continue from next position after previous
+        block = prevRecId.block;
+        slot  = prevRecId.slot + 1;
+    }
+
+    // Step 3: Walk through blocks/slots to find next occupied record
+    while (block != -1) {
+
+        // Create RecBuffer for current block
+        RecBuffer recBuffer(block);
+
+        // Get header and slotmap
+        HeadInfo header;
+        recBuffer.getHeader(&header);
+
+        unsigned char slotMap[header.numSlots];
+        recBuffer.getSlotMap(slotMap);
+
+        if (slot >= header.numSlots) {
+            // No more slots in this block — move to next block
+            block = header.rblock;
+            slot  = 0;
+            // If rblock == -1, loop condition fails and we exit
+        }
+        else if (slotMap[slot] == SLOT_UNOCCUPIED) {
+            // This slot is empty — skip it
+            slot++;
+        }
+        else {
+            // Found an occupied slot — break out of loop
+            break;
+        }
+    }
+
+    // Step 4: If block == -1, no more records exist
+    if (block == -1) {
+        return E_NOTFOUND;
+    }
+
+    // Step 5: Record found at {block, slot}
+    RecId nextRecId{block, slot};
+
+    // Update the search index to this record's position
+    RelCacheTable::setSearchIndex(relId, &nextRecId);
+
+    // Copy the record from disk into the provided record buffer
+    RecBuffer recBuffer(block);
+    recBuffer.getRecord(record, slot);
+
+    return SUCCESS;
+}
