@@ -724,7 +724,7 @@ int BlockAccess::deleteRelation(char relName[ATTR_SIZE]) {
     return SUCCESS;
 }
 // ─── End of BlockAccess::deleteRelation() 
-
+//ch
 
 int BlockAccess::search(int relId, Attribute *record,
                         char attrName[ATTR_SIZE], Attribute attrVal, int op) {
