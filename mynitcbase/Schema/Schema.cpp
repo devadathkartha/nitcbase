@@ -237,3 +237,74 @@ int Schema::deleteRel(char *relName) {
     // SUCCESS        → relation deleted successfully
     // E_RELNOTEXIST  → relation was never created in the first place
 }
+
+int Schema::createIndex(char relName[ATTR_SIZE], char attrName[ATTR_SIZE]) {
+
+    // Step 1: Protect catalog relations from indexing
+    // Catalogs use only linear search, indexing them is not permitted
+    if (strcmp(relName, RELCAT_RELNAME) == 0 || 
+        strcmp(relName, ATTRCAT_RELNAME) == 0) {
+        return E_NOTPERMITTED;
+    }
+
+    // Step 2: Get the relation's rel-id from Open Relation Table
+    int relId = OpenRelTable::getRelId(relName);
+
+    // Step 3: Check if relation is open
+    // getRelId returns E_RELNOTOPEN if not found in open table
+    if (relId == E_RELNOTOPEN) {
+        return E_RELNOTOPEN;
+    }
+
+    // Step 4: Delegate to BPlusTree layer
+    // bPlusCreate() handles:
+    //   - allocating root block
+    //   - inserting all existing records into the tree
+    //   - updating rootBlock in attribute cache
+    return BPlusTree::bPlusCreate(relId, attrName);
+}
+
+int Schema::dropIndex(char *relName, char *attrName) {
+
+    // Step 1: Protect catalog relations
+    if (strcmp(relName, RELCAT_RELNAME) == 0 || 
+        strcmp(relName, ATTRCAT_RELNAME) == 0) {
+        return E_NOTPERMITTED;
+    }
+
+    // Step 2: Get rel-id
+    int relId = OpenRelTable::getRelId(relName);
+
+    // Step 3: Check relation is open
+    if (relId == E_RELNOTOPEN) {
+        return E_RELNOTOPEN;
+    }
+
+    // Step 4: Get the attribute catalog entry to find rootBlock
+    AttrCatEntry attrCatEntry;
+    int ret = AttrCacheTable::getAttrCatEntry(relId, attrName, &attrCatEntry);
+
+    // Step 5: If attribute doesn't exist
+    if (ret != SUCCESS) {
+        return E_ATTRNOTEXIST;
+    }
+
+    // Step 6: Get rootBlock from the attribute catalog entry
+    int rootBlock = attrCatEntry.rootBlock;
+
+    // Step 7: Check if index actually exists
+    if (rootBlock == -1) {
+        return E_NOINDEX;
+    }
+
+    // Step 8: Destroy the entire B+ tree
+    // This recursively frees all index blocks (leaf + internal)
+    BPlusTree::bPlusDestroy(rootBlock);
+
+    // Step 9: Reset rootBlock = -1 in attribute cache
+    // This marks the cache entry as dirty → will be written back on closeRel()
+    attrCatEntry.rootBlock = -1;
+    AttrCacheTable::setAttrCatEntry(relId, attrName, &attrCatEntry);
+
+    return SUCCESS;
+}

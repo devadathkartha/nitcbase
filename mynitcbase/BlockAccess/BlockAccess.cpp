@@ -465,7 +465,44 @@ int BlockAccess::insert(int relId, Attribute *record) {
     relCatEntry.numRecs++;
     RelCacheTable::setRelCatEntry(relId, &relCatEntry);
 
-    return SUCCESS;
+    /* B+ Tree Insertions */
+
+    int flag = SUCCESS;
+
+    // Iterate over ALL attributes of the relation
+    for (int attrOffset = 0; attrOffset < numOfAttributes; attrOffset++) {
+
+        // Get the attribute catalog entry for this attribute
+        AttrCatEntry attrCatEntry;
+        AttrCacheTable::getAttrCatEntry(relId, attrOffset, &attrCatEntry);
+
+        // Get the rootBlock of this attribute's index
+        int rootBlock = attrCatEntry.rootBlock;
+
+        // Only insert into B+ tree if an index EXISTS on this attribute
+        if (rootBlock != -1) {
+
+            // Insert into the B+ tree
+            // Arguments: relId, attrName, attribute value from record, recId
+            int retVal = BPlusTree::bPlusInsert(relId, 
+                                                 attrCatEntry.attrName,
+                                                 record[attrOffset], 
+                                                 rec_id);
+
+            if (retVal == E_DISKFULL) {
+                // The index for this attribute has been destroyed
+                // (bPlusInsert handles destruction internally)
+                // We continue inserting into indexes of other attributes
+                // but flag this as an index release event
+                flag = E_INDEX_BLOCKS_RELEASED;
+            }
+        }
+    }
+
+    // Return SUCCESS if all went well
+    // Return E_INDEX_BLOCKS_RELEASED if any index was destroyed
+    return flag;
+
 }
 
 // BlockAccess/BlockAccess.cpp
@@ -646,7 +683,7 @@ int BlockAccess::deleteRelation(char relName[ATTR_SIZE]) {
 
         // ── Handle index deletion (skip for now, no indexing yet) ──
         if (rootBlock != -1) {
-            // BPlusTree::bPlusDestroy(rootBlock);
+            BPlusTree::bPlusDestroy(rootBlock);
             // Not implemented yet — leave this commented out
         }
 

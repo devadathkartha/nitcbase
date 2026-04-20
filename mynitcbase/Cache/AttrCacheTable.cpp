@@ -233,3 +233,79 @@ int AttrCacheTable::resetSearchIndex(int relId, int attrOffset) {
     // delegate to setSearchIndex
     return AttrCacheTable::setSearchIndex(relId, attrOffset, &resetValue);
 }
+
+int AttrCacheTable::setAttrCatEntry(int relId, char attrName[ATTR_SIZE], 
+                                     AttrCatEntry *attrCatBuf) {
+
+    // Step 1: Validate relId range
+    if (relId < 0 || relId >= MAX_OPEN) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: Check if relation is actually open
+    if (attrCache[relId] == nullptr) {
+        return E_RELNOTOPEN;
+    }
+
+    // Step 3: Traverse linked list to find matching attribute
+    AttrCacheEntry *curr = attrCache[relId];
+    while (curr != nullptr) {
+        if (strcmp(curr->attrCatEntry.attrName, attrName) == 0) {
+            
+            // Step 4: Copy the new entry into cache
+            curr->attrCatEntry = *attrCatBuf;
+            
+            // Step 5: Mark dirty so it gets written back on closeRel()
+            curr->dirty = true;
+            
+            return SUCCESS;
+        }
+        curr = curr->next;
+    }
+
+    return E_ATTRNOTEXIST;
+}
+
+int AttrCacheTable::setAttrCatEntry(int relId, int attrOffset, 
+                                     AttrCatEntry *attrCatBuf) {
+    if (relId < 0 || relId >= MAX_OPEN) {
+        return E_OUTOFBOUND;
+    }
+    if (attrCache[relId] == nullptr) {
+        return E_RELNOTOPEN;
+    }
+
+    AttrCacheEntry *curr = attrCache[relId];
+    while (curr != nullptr) {
+        if (curr->attrCatEntry.offset == attrOffset) {  // ← only difference
+            curr->attrCatEntry = *attrCatBuf;
+            curr->dirty = true;
+            return SUCCESS;
+        }
+        curr = curr->next;
+    }
+
+    return E_ATTRNOTEXIST;
+}
+
+void AttrCacheTable::attrCatEntryToRecord(AttrCatEntry *attrCatEntry, 
+                                           union Attribute record[ATTRCAT_NO_ATTRS]) {
+
+    // Field 0: RelName → string
+    strcpy(record[ATTRCAT_REL_NAME_INDEX].sVal, attrCatEntry->relName);
+
+    // Field 1: AttributeName → string
+    strcpy(record[ATTRCAT_ATTR_NAME_INDEX].sVal, attrCatEntry->attrName);
+
+    // Field 2: AttributeType → number
+    record[ATTRCAT_ATTR_TYPE_INDEX].nVal = attrCatEntry->attrType;
+
+    // Field 3: PrimaryFlag → number
+    record[ATTRCAT_PRIMARY_FLAG_INDEX].nVal = attrCatEntry->primaryFlag;
+
+    // Field 4: RootBlock → number  ← THIS IS THE KEY FIELD FOR INDEXING
+    record[ATTRCAT_ROOT_BLOCK_INDEX].nVal = attrCatEntry->rootBlock;
+
+    // Field 5: Offset → number
+    record[ATTRCAT_OFFSET_INDEX].nVal = attrCatEntry->offset;
+}
