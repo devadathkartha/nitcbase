@@ -398,3 +398,125 @@ void BlockBuffer::releaseBlock() {
     // Any further calls to this object's methods will now fail safely
     blockNum = INVALID_BLOCKNUM;
 }
+
+// ===== IndBuffer Constructors =====
+
+// Constructor 1: allocate a NEW index block of given type
+// blockType is 'I' for internal, 'L' for leaf
+IndBuffer::IndBuffer(char blockType) : BlockBuffer(blockType) {
+    // BlockBuffer(char) allocates a new block of the given type on disk
+    // and loads it into buffer. Nothing extra needed here.
+}
+
+// Constructor 2: use an EXISTING index block (already on disk)
+IndBuffer::IndBuffer(int blockNum) : BlockBuffer(blockNum) {
+    // BlockBuffer(int) loads the block with given blockNum into buffer.
+    // Nothing extra needed here.
+}
+
+
+// ===== IndInternal Constructors =====
+
+// Constructor 1: allocate a new INTERNAL index block
+IndInternal::IndInternal() : IndBuffer('I') {
+    // 'I' tells IndBuffer (and ultimately BlockBuffer) to allocate
+    // a new block of type IND_INTERNAL
+}
+
+// Constructor 2: use existing internal index block
+IndInternal::IndInternal(int blockNum) : IndBuffer(blockNum) {
+    // loads the existing block with given blockNum
+}
+
+
+// ===== IndLeaf Constructors =====
+
+// Constructor 1: allocate a new LEAF index block
+IndLeaf::IndLeaf() : IndBuffer('L') {
+    // 'L' tells IndBuffer to allocate a new block of type IND_LEAF
+}
+
+// Constructor 2: use existing leaf index block
+IndLeaf::IndLeaf(int blockNum) : IndBuffer(blockNum) {
+    // loads the existing block with given blockNum
+}
+
+
+// ===== IndInternal::getEntry() =====
+// Copies the indexNum-th entry from an internal index block into *ptr
+
+int IndInternal::getEntry(void *ptr, int indexNum) {
+
+    // Step 1: validate indexNum range
+    if (indexNum < 0 || indexNum >= MAX_KEYS_INTERNAL) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: get pointer to this block's buffer
+    unsigned char *bufferPtr;
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    // Step 3: cast the void* to InternalEntry*
+    // The caller is responsible for passing a valid InternalEntry*
+    struct InternalEntry *internalEntry = (struct InternalEntry *)ptr;
+
+    // Step 4: calculate where this entry starts in the buffer
+    // Layout: [HEADER(32B)][lChild(4B)][attrVal(16B)][lChild(4B)][attrVal(16B)]...
+    // Each entry occupies 20 bytes (4 for lChild + 16 for attrVal)
+    // The rChild of entry i = lChild stored at start of entry i+1
+    unsigned char *entryPtr = bufferPtr + HEADER_SIZE + (indexNum * 20);
+
+    // Step 5: copy each field individually (avoid alignment issues)
+    memcpy(&(internalEntry->lChild),  entryPtr,      sizeof(int32_t)); // 4 bytes
+    memcpy(&(internalEntry->attrVal), entryPtr + 4,  sizeof(Attribute)); // 16 bytes
+    memcpy(&(internalEntry->rChild),  entryPtr + 20, sizeof(int32_t)); // 4 bytes
+    // Note: rChild is at offset +20 because it's the lChild of the NEXT entry
+
+    return SUCCESS;
+}
+
+
+// ===== IndInternal::setEntry() =====
+// (Stub for now — will be implemented in later stage)
+int IndInternal::setEntry(void *ptr, int indexNum) {
+    return 0;
+}
+
+
+// ===== IndLeaf::getEntry() =====
+// Copies the indexNum-th entry from a leaf index block into *ptr
+
+int IndLeaf::getEntry(void *ptr, int indexNum) {
+
+    // Step 1: validate indexNum range
+    if (indexNum < 0 || indexNum >= MAX_KEYS_LEAF) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: get pointer to this block's buffer
+    unsigned char *bufferPtr;
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    // Step 3: calculate entry start position
+    // LEAF_ENTRY_SIZE = 32 bytes per entry
+    unsigned char *entryPtr = bufferPtr + HEADER_SIZE + (indexNum * LEAF_ENTRY_SIZE);
+
+    // Step 4: copy the entire Index struct at once
+    // (safe here because Index fields are packed same as on disk)
+    memcpy((struct Index *)ptr, entryPtr, LEAF_ENTRY_SIZE);
+
+    return SUCCESS;
+}
+
+
+// ===== IndLeaf::setEntry() =====
+// (Stub for now — will be implemented in later stage)
+int IndLeaf::setEntry(void *ptr, int indexNum) {
+    return 0;
+}

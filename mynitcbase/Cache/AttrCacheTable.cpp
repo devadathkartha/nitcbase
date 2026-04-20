@@ -71,3 +71,165 @@ int AttrCacheTable::getAttrCatEntry(int relId, char attrName[ATTR_SIZE], AttrCat
   // No attribute with name attrName found for the relation
   return E_ATTRNOTEXIST;
 }
+
+// Cache/AttrCacheTable.cpp
+
+// ===== getSearchIndex (attrName version) =====
+// Retrieves the current searchIndex for the named attribute
+
+int AttrCacheTable::getSearchIndex(int relId, char attrName[ATTR_SIZE],
+                                    IndexId *searchIndex) {
+
+    // Step 1: validate relId bounds
+    if (relId < 0 || relId >= MAX_OPEN) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: check if this relation is actually open
+    if (attrCache[relId] == nullptr) {
+        return E_RELNOTOPEN;
+    }
+
+    // Step 3: traverse the linked list of attributes for this relation
+    AttrCacheEntry *curr = attrCache[relId];
+    while (curr != nullptr) {
+
+        // compare attribute name (use strncmp or strcmp)
+        if (strcmp(curr->attrCatEntry.attrName, attrName) == 0) {
+
+            // found the attribute — copy its searchIndex to output
+            *searchIndex = curr->searchIndex;
+            return SUCCESS;
+        }
+        curr = curr->next;
+    }
+
+    // attribute with given name not found in this relation
+    return E_ATTRNOTEXIST;
+}
+
+
+// ===== getSearchIndex (attrOffset version) =====
+// Retrieves the current searchIndex for the attribute at given offset
+
+int AttrCacheTable::getSearchIndex(int relId, int attrOffset,
+                                    IndexId *searchIndex) {
+
+    // Step 1: validate relId bounds
+    if (relId < 0 || relId >= MAX_OPEN) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: check if this relation is actually open
+    if (attrCache[relId] == nullptr) {
+        return E_RELNOTOPEN;
+    }
+
+    // Step 3: traverse the linked list to find the attribute at given offset
+    AttrCacheEntry *curr = attrCache[relId];
+    while (curr != nullptr) {
+
+        if (curr->attrCatEntry.offset == attrOffset) {
+
+            // found the attribute — copy its searchIndex to output
+            *searchIndex = curr->searchIndex;
+            return SUCCESS;
+        }
+        curr = curr->next;
+    }
+
+    return E_ATTRNOTEXIST;
+}
+
+
+// ===== setSearchIndex (attrName version) =====
+// Updates the searchIndex for the named attribute
+
+int AttrCacheTable::setSearchIndex(int relId, char attrName[ATTR_SIZE],
+                                    IndexId *searchIndex) {
+
+    // Step 1: validate relId bounds
+    if (relId < 0 || relId >= MAX_OPEN) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: check if this relation is actually open
+    if (attrCache[relId] == nullptr) {
+        return E_RELNOTOPEN;
+    }
+
+    // Step 3: traverse the linked list to find the attribute
+    AttrCacheEntry *curr = attrCache[relId];
+    while (curr != nullptr) {
+
+        if (strcmp(curr->attrCatEntry.attrName, attrName) == 0) {
+
+            // found the attribute — update its searchIndex from input
+            curr->searchIndex = *searchIndex;
+            return SUCCESS;
+        }
+        curr = curr->next;
+    }
+
+    return E_ATTRNOTEXIST;
+}
+
+
+// ===== setSearchIndex (attrOffset version) =====
+// Updates the searchIndex for the attribute at given offset
+
+int AttrCacheTable::setSearchIndex(int relId, int attrOffset,
+                                    IndexId *searchIndex) {
+
+    // Step 1: validate relId bounds
+    if (relId < 0 || relId >= MAX_OPEN) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: check if this relation is actually open
+    if (attrCache[relId] == nullptr) {
+        return E_RELNOTOPEN;
+    }
+
+    // Step 3: traverse the linked list to find the attribute
+    AttrCacheEntry *curr = attrCache[relId];
+    while (curr != nullptr) {
+
+        if (curr->attrCatEntry.offset == attrOffset) {
+
+            // found the attribute — update its searchIndex from input
+            curr->searchIndex = *searchIndex;
+            return SUCCESS;
+        }
+        curr = curr->next;
+    }
+
+    return E_ATTRNOTEXIST;
+}
+
+
+// ===== resetSearchIndex (attrName version) =====
+// Resets the searchIndex to {-1, -1} for the named attribute
+// This forces bPlusSearch() to start from the root next time
+
+int AttrCacheTable::resetSearchIndex(int relId, char attrName[ATTR_SIZE]) {
+
+    // create an IndexId with sentinel value {-1, -1}
+    IndexId resetValue = {-1, -1};
+
+    // delegate to setSearchIndex — reuse all the validation logic
+    return AttrCacheTable::setSearchIndex(relId, attrName, &resetValue);
+}
+
+
+// ===== resetSearchIndex (attrOffset version) =====
+// Resets the searchIndex to {-1, -1} for the attribute at given offset
+
+int AttrCacheTable::resetSearchIndex(int relId, int attrOffset) {
+
+    // create an IndexId with sentinel value {-1, -1}
+    IndexId resetValue = {-1, -1};
+
+    // delegate to setSearchIndex
+    return AttrCacheTable::setSearchIndex(relId, attrOffset, &resetValue);
+}

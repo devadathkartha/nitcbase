@@ -135,3 +135,19 @@ int StaticBuffer::setDirtyBit(int blockNum) {
     return SUCCESS;
 }
 
+
+// Buffer/StaticBuffer.cpp
+
+int StaticBuffer::getStaticBlockType(int blockNum) {
+
+    // Step 1: validate blockNum
+    // blockNum must be in range [0, DISK_BLOCKS - 1]
+    if (blockNum < 0 || blockNum >= DISK_BLOCKS) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: read from the block allocation map
+    // blockAllocMap[blockNum] stores the type of block at that position
+    // Types: UNUSED_BLK, BMAP, REC, IND_INTERNAL, IND_LEAF
+    return (int)blockAllocMap[blockNum];
+}

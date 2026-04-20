@@ -1,4 +1,4 @@
-#ifndef NITCBASE_BLOCKBUFFER_H
+  #ifndef NITCBASE_BLOCKBUFFER_H
 #define NITCBASE_BLOCKBUFFER_H
 
 #include <cstdint>
