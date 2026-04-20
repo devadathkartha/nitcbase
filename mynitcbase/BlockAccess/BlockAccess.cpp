@@ -726,37 +726,52 @@ int BlockAccess::deleteRelation(char relName[ATTR_SIZE]) {
 // ─── End of BlockAccess::deleteRelation() 
 //ch
 
-int BlockAccess::search(int relId, Attribute *record,
-                        char attrName[ATTR_SIZE], Attribute attrVal, int op) {
+// BlockAccess/BlockAccess.cpp
 
-    // Step 1: Declare a RecId to store the result of the search
+int BlockAccess::search(int relId, Attribute *record, char attrName[ATTR_SIZE],
+                        Attribute attrVal, int op) {
+
+    // will store the rec-id of the found record
     RecId recId;
 
-    /* Step 2: Search for a record satisfying the condition
-       attrName op attrVal using linearSearch.
-       
-       linearSearch() uses the searchIndex stored in the relation cache
-       to continue from where it left off (stateful search).
-       Each call returns the NEXT matching record.
-    */
-    recId = BlockAccess::linearSearch(relId, attrName, attrVal, op);
+    // Step 1: get the attribute catalog entry for this attribute
+    // We need it to check rootBlock (is there an index?)
+    AttrCatEntry attrCatEntry;
+    int ret = AttrCacheTable::getAttrCatEntry(relId, attrName, &attrCatEntry);
 
-    // Step 3: If no matching record was found, return E_NOTFOUND
+    // if attribute doesn't exist or relation not open, return error
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    // Step 2: check if an index exists for this attribute
+    int rootBlock = attrCatEntry.rootBlock;
+
+    if (rootBlock == -1) {
+        // NO INDEX — use linear search
+        // linearSearch() uses RelCache searchIndex to track position
+        // (caller has already reset RelCache searchIndex before first call)
+        recId = BlockAccess::linearSearch(relId, attrName, attrVal, op);
+
+    } else {
+        // INDEX EXISTS — use B+ tree search
+        // bPlusSearch() uses AttrCache searchIndex to track position
+        // (caller has already reset AttrCache searchIndex before first call)
+        recId = BPlusTree::bPlusSearch(relId, attrName, attrVal, op);
+    }
+
+    // Step 3: check if any record was found
     if (recId.block == -1 && recId.slot == -1) {
+        // no record satisfying condition exists (or no more records)
         return E_NOTFOUND;
     }
 
-    /* Step 4: A matching record was found at recId.
-       Copy that record into the output buffer `record`.
-       
-       Create a RecBuffer object for the block containing the record,
-       then use getRecord() to fetch it into `record`.
-    */
+    // Step 4: fetch the actual record data using the RecId
+    // RecId tells us which block and slot the record is in
     RecBuffer recBuffer(recId.block);
-    int ret = recBuffer.getRecord(record, recId.slot);
+    ret = recBuffer.getRecord(record, recId.slot);
 
-    // Step 5: Return the result of getRecord()
-    // (SUCCESS if all went well, or an error code)
+    // return whatever getRecord returns (SUCCESS or error)
     return ret;
 }
 
