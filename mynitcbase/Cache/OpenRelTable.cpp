@@ -351,79 +351,81 @@ int OpenRelTable::openRel(char relName[ATTR_SIZE]) {
 
 int OpenRelTable::closeRel(int relId) {
 
-    // RELATIONCAT (relId=0) and ATTRIBUTECAT (relId=1) cannot be closed
-    // They are always open while the system is running
+    // Guard 1: Cannot close the catalog relations mid-session
     if (relId == RELCAT_RELID || relId == ATTRCAT_RELID) {
         return E_NOTPERMITTED;
     }
 
-    // relId must be within valid range
+    // Guard 2: relId must be in valid range
     if (relId < 0 || relId >= MAX_OPEN) {
         return E_OUTOFBOUND;
     }
 
-    // The slot must actually be occupied (a relation must be open here)
+    // Guard 3: The relation must actually be open
     if (tableMetaInfo[relId].free == true) {
         return E_RELNOTOPEN;
     }
 
-    /****** Step 1: Write back Relation Cache entry if dirty ******/
+    /****** Releasing the Relation Cache entry ******/
 
     if (RelCacheTable::relCache[relId]->dirty == true) {
 
-        // Get the current (modified) RelCatEntry from the cache
+        // Get the RelCatEntry from cache
         RelCatEntry relCatEntry;
         RelCacheTable::getRelCatEntry(relId, &relCatEntry);
 
-        // Convert the struct to a record (array of union Attribute)
-        // so it can be written to the actual catalog block
+        // Get the recId (where this entry lives on disk)
+        RecId recId = RelCacheTable::relCache[relId]->recId;
+
+        // Convert RelCatEntry → record format
         union Attribute record[RELCAT_NO_ATTRS];
         RelCacheTable::relCatEntryToRecord(&relCatEntry, record);
 
-        // Get the recId — tells us which block and slot to write to
-        // This is the location of this relation's entry in RELATIONCAT
-        RecId recId = RelCacheTable::relCache[relId]->recId;
-
-        // Open the RELATIONCAT block that contains this relation's entry
-        // Using Constructor2 because the block already exists on disk
+        // Write back to disk buffer
         RecBuffer relCatBlock(recId.block);
-
-        // Write the record into the correct slot
         relCatBlock.setRecord(record, recId.slot);
-
-        // setRecord internally calls setDirtyBit, so the buffer will
-        // write this back to disk at shutdown
     }
 
-    /****** Step 2: Free the Attribute Cache entries ******/
-
-    // The attribute cache for this relation is a linked list of
-    // AttrCacheEntry nodes, each malloc'd when the relation was opened
-    // We must free them all to avoid memory leaks
-
-    AttrCacheEntry *attrCacheEntry = AttrCacheTable::attrCache[relId];
-
-    while (attrCacheEntry != nullptr) {
-        // Save pointer to next before freeing current
-        AttrCacheEntry *next = attrCacheEntry->next;
-        free(attrCacheEntry);
-        attrCacheEntry = next;
-    }
-
-    // Set the attr cache pointer to null for this relId
-    AttrCacheTable::attrCache[relId] = nullptr;
-
-    /****** Step 3: Free the Relation Cache entry ******/
-
-    // Free the malloc'd RelCacheEntry for this relId
+    // Free the dynamically allocated RelCacheEntry
     delete RelCacheTable::relCache[relId];
     RelCacheTable::relCache[relId] = nullptr;
 
-    /****** Step 4: Mark the Open Relation Table slot as free ******/
+    /****** Releasing the Attribute Cache entry ******/
+    //  THIS SECTION IS NEW IN STAGE 11
 
-    // Reset the metainfo for this slot so it can be reused
+    // Traverse the linked list of AttrCacheEntry for this relation
+    AttrCacheEntry *curr = AttrCacheTable::attrCache[relId];
+
+    while (curr != nullptr) {
+
+        if (curr->dirty == true) {
+
+            // Get the recId of this attribute catalog entry on disk
+            RecId recId = curr->recId;
+
+            // Convert AttrCatEntry → record format using our new function
+            union Attribute record[ATTRCAT_NO_ATTRS];
+            AttrCacheTable::attrCatEntryToRecord(&curr->attrCatEntry, record);
+
+            // Write back to the attribute catalog block on disk
+            RecBuffer attrCatBlock(recId.block);
+            attrCatBlock.setRecord(record, recId.slot);
+        }
+
+        // Move to next node, then free current node
+        AttrCacheEntry *next = curr->next;
+        delete curr;
+        curr = next;
+    }
+
+    // Set the head of the linked list to nullptr
+    AttrCacheTable::attrCache[relId] = nullptr;
+
+    /****** Update tableMetaInfo ******/
+
+    // Mark this entry as free in the Open Relation Table
     tableMetaInfo[relId].free = true;
-    strcpy(tableMetaInfo[relId].relName, "\0");
+    strcpy(tableMetaInfo[relId].relName, "");
 
     return SUCCESS;
 }

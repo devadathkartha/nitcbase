@@ -480,9 +480,39 @@ int IndInternal::getEntry(void *ptr, int indexNum) {
 
 
 // ===== IndInternal::setEntry() =====
-// (Stub for now — will be implemented in later stage)
 int IndInternal::setEntry(void *ptr, int indexNum) {
-    return 0;
+
+    // Step 1: Validate indexNum range
+    if (indexNum < 0 || indexNum >= MAX_KEYS_INTERNAL) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: Get pointer to buffer containing this block
+    unsigned char *bufferPtr;
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    // Step 3: Cast void* to InternalEntry*
+    struct InternalEntry *internalEntry = (struct InternalEntry *)ptr;
+
+    // Step 4: Calculate starting position (20 bytes per entry, not sizeof(InternalEntry))
+    unsigned char *entryPtr = bufferPtr + HEADER_SIZE + (indexNum * 20);
+
+    // Step 5: Copy each field SEPARATELY to avoid padding issues
+    memcpy(entryPtr,      &(internalEntry->lChild),  4);          // lChild: 4 bytes
+    memcpy(entryPtr + 4,  &(internalEntry->attrVal), ATTR_SIZE);  // attrVal: 16 bytes
+    memcpy(entryPtr + 20, &(internalEntry->rChild),  4);          // rChild: 4 bytes
+    //                                                              offset 20 = 4+16
+
+    // Step 6: Mark dirty
+    ret = StaticBuffer::setDirtyBit(this->blockNum);
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    return SUCCESS;
 }
 
 
@@ -516,7 +546,33 @@ int IndLeaf::getEntry(void *ptr, int indexNum) {
 
 
 // ===== IndLeaf::setEntry() =====
-// (Stub for now — will be implemented in later stage)
 int IndLeaf::setEntry(void *ptr, int indexNum) {
-    return 0;
+
+    // Step 1: Validate indexNum range
+    if (indexNum < 0 || indexNum >= MAX_KEYS_LEAF) {
+        return E_OUTOFBOUND;
+    }
+
+    // Step 2: Get pointer to buffer containing this block
+    unsigned char *bufferPtr;
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    // Step 3: Calculate exact position of this entry in the buffer
+    unsigned char *entryPtr = bufferPtr + HEADER_SIZE + (indexNum * LEAF_ENTRY_SIZE);
+
+    // Step 4: Copy the Index struct into the buffer
+    // Note: We use memcpy on the whole struct here because
+    // Index struct fields align naturally with disk layout
+    memcpy(entryPtr, (struct Index *)ptr, LEAF_ENTRY_SIZE);
+
+    // Step 5: Mark the buffer as dirty (needs to be written to disk)
+    ret = StaticBuffer::setDirtyBit(this->blockNum);
+    if (ret != SUCCESS) {
+        return ret;
+    }
+
+    return SUCCESS;
 }
