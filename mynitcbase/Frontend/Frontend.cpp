@@ -108,19 +108,70 @@ int Frontend::select_attrlist_from_table_where(
     return ret;
 }
 
-int Frontend::select_from_join_where(char relname_source_one[ATTR_SIZE], char relname_source_two[ATTR_SIZE],
-                                     char relname_target[ATTR_SIZE],
-                                     char join_attr_one[ATTR_SIZE], char join_attr_two[ATTR_SIZE]) {
-  // Algebra::join
-  return SUCCESS;
+int Frontend::select_from_join_where(
+    char relname_source_one[ATTR_SIZE], char relname_source_two[ATTR_SIZE],
+    char relname_target[ATTR_SIZE],
+    char join_attr_one[ATTR_SIZE], char join_attr_two[ATTR_SIZE]) {
+
+    // Just a direct passthrough to Algebra::join()
+    // All validation and logic is handled there
+    int ret = Algebra::join(
+        relname_source_one,   // Relation_1
+        relname_source_two,   // Relation_2
+        relname_target,       // Target relation
+        join_attr_one,        // join attribute from Rel1
+        join_attr_two         // join attribute from Rel2
+    );
+
+    return ret;  // pass back whatever Algebra::join() returned
 }
 
-int Frontend::select_attrlist_from_join_where(char relname_source_one[ATTR_SIZE], char relname_source_two[ATTR_SIZE],
-                                              char relname_target[ATTR_SIZE],
-                                              char join_attr_one[ATTR_SIZE], char join_attr_two[ATTR_SIZE],
-                                              int attr_count, char attr_list[][ATTR_SIZE]) {
-  // Algebra::join + project
-  return SUCCESS;
+int Frontend::select_attrlist_from_join_where(
+    char relname_source_one[ATTR_SIZE], char relname_source_two[ATTR_SIZE],
+    char relname_target[ATTR_SIZE], char join_attr_one[ATTR_SIZE],
+    char join_attr_two[ATTR_SIZE], int attr_count, char attr_list[][ATTR_SIZE]) {
+
+    /************************************************************
+     * PHASE 1: Perform full join into a temporary relation
+     ************************************************************/
+    int joinRet = Algebra::join(
+        relname_source_one,
+        relname_source_two,
+        "TEMP",           // hardcoded intermediate relation name
+        join_attr_one,
+        join_attr_two
+    );
+
+    if (joinRet != SUCCESS)
+        return joinRet;   // E_RELNOTOPEN, E_DISKFULL, etc. — return as-is
+
+    /************************************************************
+     * PHASE 2: Open TEMP so we can project from it
+     ************************************************************/
+    int tempRelId = OpenRelTable::openRel("TEMP");
+    if (tempRelId < 0) {
+        // Can't open TEMP — clean up and bail
+        Schema::deleteRel("TEMP");
+        return tempRelId;  // E_CACHEFULL
+    }
+
+    /************************************************************
+     * PHASE 3: Project from TEMP into the actual target relation
+     ************************************************************/
+    int projectRet = Algebra::project(
+        "TEMP",           // source = intermediate relation
+        relname_target,   // destination = user's requested target
+        attr_count,       // number of attributes to keep
+        attr_list         // which attributes to keep
+    );
+
+    /************************************************************
+     * PHASE 4: Cleanup — always runs regardless of project result
+     ************************************************************/
+    OpenRelTable::closeRel(tempRelId);   // close TEMP first
+    Schema::deleteRel("TEMP");           // then delete it
+
+    return projectRet;  // return whatever project() returned
 }
 
 int Frontend::custom_function(int argc, char argv[][ATTR_SIZE]) {
